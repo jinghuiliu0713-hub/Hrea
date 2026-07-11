@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>代码小人走爱心</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #0a0a1a;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Courier New', 'Consolas', monospace;
+    -webkit-tap-highlight-color: transparent;
+  }
+  canvas {
+    display: block;
+    border-radius: 12px;
+  }
+  #status {
+    position: fixed;
+    bottom: 20px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: #555;
+    letter-spacing: 2px;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div id="status">// loading...</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const status = document.getElementById('status');
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const size = Math.min(window.innerWidth, window.innerHeight) * 0.88;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  W = size;
+  H = size;
+  initHeart();
+}
+
+let W, H;
+
+function heartX(t) { return 16 * Math.pow(Math.sin(t), 3); }
+function heartY(t) { return 13*Math.cos(t) - 5*Math.cos(2*t) - 2*Math.cos(3*t) - Math.cos(4*t); }
+
+let scale, cx, cy, pts, segs, total, SPEED;
+
+function initHeart() {
+  scale = W / 42;
+  cx = W / 2;
+  cy = H / 2 + 20;
+
+  const N = 600;
+  pts = [];
+  for (let i = 0; i <= N; i++) {
+    const t = (i / N) * Math.PI * 2;
+    pts.push({ x: cx + heartX(t)*scale, y: cy - heartY(t)*scale });
+  }
+
+  segs = [];
+  total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const d = Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y);
+    segs.push(d);
+    total += d;
+  }
+
+  SPEED = total / (60 * 7);
+}
+
+function getPosAt(s) {
+  s = ((s % total) + total) % total;
+  let acc = 0;
+  for (let i = 0; i < segs.length; i++) {
+    if (acc + segs[i] >= s) {
+      const t = (s - acc) / segs[i];
+      const p0 = pts[i], p1 = pts[i+1];
+      return {
+        x: p0.x + (p1.x - p0.x) * t,
+        y: p0.y + (p1.y - p0.y) * t,
+        angle: Math.atan2(p1.y - p0.y, p1.x - p0.x)
+      };
+    }
+    acc += segs[i];
+  }
+  return { ...pts[0], angle: 0 };
+}
+
+const particles = [];
+function spawnParticle(x, y) {
+  particles.push({
+    x, y,
+    vx: (Math.random() - .5) * 1.5,
+    vy: (Math.random() - .5) * 1.5 - .4,
+    life: 1,
+    decay: .02 + Math.random() * .015,
+    r: 1.5 + Math.random() * 2
+  });
+}
+
+function drawMapHeart() {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.closePath();
+  ctx.strokeStyle = 'rgba(255,20,147,0.15)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+function drawTrail(dist) {
+  const steps = Math.floor((dist / total) * 600);
+  if (steps < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i <= Math.min(steps, pts.length - 1); i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.strokeStyle = '#ff1493';
+  ctx.lineWidth = 2.5;
+  ctx.shadowColor = '#ff1493';
+  ctx.shadowBlur = 10;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+}
+
+const footprints = [];
+function drawFootprints() {
+  ctx.font = 'bold 11px Courier New';
+  ctx.textAlign = 'center';
+  for (const f of footprints) {
+    ctx.fillStyle = `rgba(0,255,170,${f.alpha})`;
+    ctx.fillText(f.char, f.x, f.y);
+    f.alpha -= .002;
+  }
+}
+
+function drawStickFigure(pos, phase) {
+  const { x, y, angle } = pos;
+  ctx.save();
+  ctx.translate(x, y);
+  const norm = ((angle % (Math.PI*2)) + Math.PI*2) % (Math.PI*2);
+  const flip = (norm > Math.PI*.5 && norm < Math.PI*1.5) ? -1 : 1;
+  ctx.scale(flip, 1);
+
+  ctx.strokeStyle = '#00ffff';
+  ctx.fillStyle = '#00ffff';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.shadowColor = '#00ffff';
+  ctx.shadowBlur = 8;
+
+  const H2 = 8, BODY = 14, LEG = 12, ARM = 9;
+  const sw = Math.sin(phase) * 0.38;
+
+  ctx.beginPath(); ctx.arc(0, -BODY-H2, H2, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, -BODY); ctx.lineTo(0, 0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.sin(sw)*LEG, Math.cos(sw)*LEG); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-Math.sin(sw)*LEG, Math.cos(sw)*LEG); ctx.stroke();
+  const aw = Math.sin(phase + .5) * .5;
+  ctx.beginPath(); ctx.moveTo(0, -BODY+5); ctx.lineTo(Math.sin(aw)*ARM, -BODY+5+Math.cos(aw)*ARM*.7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, -BODY+5); ctx.lineTo(-Math.sin(aw)*ARM, -BODY+5+Math.cos(aw)*ARM*.7); ctx.stroke();
+
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+const codeRain = Array.from({ length: 16 }, () => ({
+  x: Math.random() * W,
+  y: Math.random() * H,
+  speed: .3 + Math.random() * .4,
+  char: ['0','1','♥','<','>','/'][Math.floor(Math.random()*6)],
+  op: .03 + Math.random() * .06
+}));
+function drawRain() {
+  ctx.font = '11px Courier New';
+  ctx.textAlign = 'left';
+  for (const d of codeRain) {
+    ctx.fillStyle = `rgba(255,20,147,${d.op})`;
+    ctx.fillText(d.char, d.x, d.y);
+    d.y += d.speed;
+    if (d.y > H) {
+      d.y = -12;
+      d.char = ['0','1','♥','<','>','/'][Math.floor(Math.random()*6)];
+    }
+  }
+}
+
+let dist = 0, phase = 0, footCount = 0, stepCount = 0;
+let done = false, doneTime = 0, fillAlpha = 0;
+
+function loop() {
+  requestAnimationFrame(loop);
+
+  ctx.fillStyle = 'rgba(10,10,26,0.82)';
+  ctx.fillRect(0, 0, W, H);
+
+  drawRain();
+  drawMapHeart();
+
+  if (!done) {
+    drawTrail(dist);
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy; p.life -= p.decay;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI*2);
+      ctx.fillStyle = `hsla(330,100%,70%,${p.life * .5})`;
+      ctx.fill();
+    }
+
+    drawFootprints();
+
+    const pos = getPosAt(dist);
+    drawStickFigure(pos, phase);
+
+    if (Math.random() < .5) spawnParticle(pos.x, pos.y);
+
+    stepCount++;
+    if (stepCount % 6 === 0) {
+      footprints.push({ x: pos.x, y: pos.y + 14, char: footCount % 2 === 0 ? '1' : '0', alpha: .8 });
+      footCount++;
+      if (footprints.length > 80) footprints.shift();
+    }
+
+    dist += SPEED;
+    phase += .22;
+    const pct = Math.min(100, Math.round((dist / total) * 100));
+    status.textContent = `// walking heart... ${pct}%`;
+
+    if (dist >= total) {
+      done = true;
+      doneTime = Date.now();
+      status.textContent = '// ❤ mission complete';
+    }
+
+  } else {
+    const elapsed = (Date.now() - doneTime) / 1000;
+    fillAlpha = Math.min(elapsed * .35, .22);
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(255,20,147,${fillAlpha})`;
+    ctx.shadowColor = '#ff1493'; ctx.shadowBlur = 30;
+    ctx.fill(); ctx.shadowBlur = 0;
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.strokeStyle = '#ff1493';
+    ctx.lineWidth = 2.5;
+    ctx.shadowColor = '#ff1493'; ctx.shadowBlur = 14;
+    ctx.stroke(); ctx.shadowBlur = 0;
+
+    drawFootprints();
+
+    const jumpY = Math.abs(Math.sin(elapsed * 5)) * 18;
+    const top = getPosAt(0);
+    drawStickFigure({ x: top.x, y: top.y - jumpY, angle: 0 }, elapsed * 7);
+
+    if (elapsed > 4.5) {
+      done = false; dist = 0; fillAlpha = 0;
+      footprints.length = 0; particles.length = 0;
+      footCount = 0; stepCount = 0;
+      status.textContent = '// restarting...';
+    }
+  }
+}
+
+window.addEventListener('resize', resize);
+resize();
+loop();
+</script>
+</body>
+</html>
